@@ -4,6 +4,32 @@ const express = require("express");
 const router = express.Router();
 const Airport = require("../models/Airport");
 
+const GEO_KEY = "airports-geo";
+const POPULARITY_KEY = "airport_popularity";
+
+function normalizeAirportPayload(payload) {
+  if (!payload) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    iata_faa: payload.iata_faa || payload.iata_code || payload.iata
+  };
+}
+
+async function addAirportToGeo(airport) {
+  if (!airport.iata_faa || airport.lat == null || airport.lng == null) {
+    return;
+  }
+
+  await redisGeo.geoAdd(GEO_KEY, {
+    longitude: Number(airport.lng),
+    latitude: Number(airport.lat),
+    member: airport.iata_faa
+  });
+}
+
 router.get("/", async (req, res) => {
   try {
     const airports = await Airport.find();
@@ -17,15 +43,24 @@ router.get("/", async (req, res) => {
 });
 router.post("/", async (req, res) => {
   try {
-    const airport = await Airport.create(req.body);
+    const payload = normalizeAirportPayload(req.body);
 
-    if (airport.iata_faa && airport.lat && airport.lng) {
-      await redisGeo.geoAdd("airports-geo", {
-        longitude: airport.lng,
-        latitude: airport.lat,
-        member: airport.iata_faa
+    if (!payload.iata_faa) {
+      return res.status(400).json({
+        error: "El campo iata_faa o iata_code es obligatorio"
       });
     }
+
+    const existingAirport = await Airport.findOne({ iata_faa: payload.iata_faa });
+    if (existingAirport) {
+      return res.status(409).json({
+        error: "Ya existe un aeropuerto con ese codigo IATA"
+      });
+    }
+
+    const airport = await Airport.create(payload);
+
+    await addAirportToGeo(airport);
 
     res.status(201).json(airport);
 
@@ -40,9 +75,9 @@ router.get("/popular", async (req, res) => {
   try {
 
     const popular = await redisPopularity.zRangeWithScores(
-      "airport_popularity",
+      POPULARITY_KEY,
       0,
-      10,
+      -1,
       { REV: true }
     );
 
@@ -68,7 +103,7 @@ router.get("/nearby", async (req, res) => {
     }
 
     const nearbyCodes = await redisGeo.geoSearch(
-      "airports-geo",
+      GEO_KEY,
       {
         longitude: Number(lng),
         latitude: Number(lat)
@@ -94,9 +129,20 @@ router.get("/nearby", async (req, res) => {
 
 router.put("/:iata", async (req, res) => {
   try {
+    const payload = normalizeAirportPayload(req.body);
+
+    if (payload.iata_faa && payload.iata_faa !== req.params.iata) {
+      const existingAirport = await Airport.findOne({ iata_faa: payload.iata_faa });
+      if (existingAirport) {
+        return res.status(409).json({
+          error: "Ya existe un aeropuerto con ese codigo IATA"
+        });
+      }
+    }
+
     const airport = await Airport.findOneAndUpdate(
       { iata_faa: req.params.iata },
-      req.body,
+      payload,
       { new: true }
     );
 
@@ -106,13 +152,12 @@ router.put("/:iata", async (req, res) => {
       });
     }
 
-    if (airport.iata_faa && airport.lat && airport.lng) {
-      await redisGeo.geoAdd("airports-geo", {
-        longitude: airport.lng,
-        latitude: airport.lat,
-        member: airport.iata_faa
-      });
+    if (airport.iata_faa !== req.params.iata) {
+      await redisGeo.zRem(GEO_KEY, req.params.iata);
+      await redisPopularity.zRem(POPULARITY_KEY, req.params.iata);
     }
+
+    await addAirportToGeo(airport);
 
     res.json(airport);
 
@@ -135,8 +180,8 @@ router.delete("/:iata", async (req, res) => {
       });
     }
 
-    await redisGeo.zRem("airports-geo", req.params.iata);
-    await redisPopularity.zRem("airport_popularity", req.params.iata);
+    await redisGeo.zRem(GEO_KEY, req.params.iata);
+    await redisPopularity.zRem(POPULARITY_KEY, req.params.iata);
 
     res.json({
       message: "Aeropuerto eliminado correctamente",
@@ -164,13 +209,13 @@ router.get("/:iata", async (req, res) => {
     }
 
     await redisPopularity.zIncrBy(
-      "airport_popularity",
+      POPULARITY_KEY,
       1,
-      req.params.iata
+      airport.iata_faa
     );
 
     await redisPopularity.expire(
-      "airport_popularity",
+      POPULARITY_KEY,
       86400
     );
 

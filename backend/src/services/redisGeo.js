@@ -1,7 +1,7 @@
 const { createClient } = require("redis");
 
 const redisGeo = createClient({
-  url: "redis://localhost:6380"
+  url: process.env.REDIS_GEO_URL || "redis://localhost:6380"
 });
 
 redisGeo.on("error", (err) => {

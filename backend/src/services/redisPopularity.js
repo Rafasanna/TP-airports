@@ -1,7 +1,7 @@
 const { createClient } = require("redis");
 
 const redisPopularity = createClient({
-  url: "redis://localhost:6379"
+  url: process.env.REDIS_POP_URL || "redis://localhost:6379"
 });
 
 redisPopularity.on("error", (err) => {
