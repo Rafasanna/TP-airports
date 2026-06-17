@@ -2,6 +2,15 @@
 
 API REST y frontend de aeropuertos para Bases de Datos NoSQL. El backend usa MongoDB como almacenamiento principal, Redis GEO para consultas por cercania y Redis ZSET para ranking de popularidad. El frontend muestra los aeropuertos en un mapa Leaflet con clustering de marcadores.
 
+## Tecnologias usadas
+
+- Node.js, Express y Mongoose.
+- MongoDB.
+- Redis GEO.
+- Redis ZSET para popularidad.
+- React, Vite, Leaflet y leaflet.markercluster.
+- Docker Compose.
+
 ## Servicios
 
 - `mongo`: base de datos principal.
@@ -39,7 +48,7 @@ Al iniciar, el backend carga `backend/data/airports.json` en MongoDB si la colec
 curl http://localhost:3000/airports
 curl http://localhost:3000/airports/JFK
 curl http://localhost:3000/airports/popular
-curl "http://localhost:3000/airports/nearby?lat=40.6413&lng=-73.7781&radius=50"
+curl "http://localhost:3000/airports/nearby?lat=-34.6&lng=-58.4&radius=500"
 ```
 
 Cada click en un marcador del mapa consulta `GET /airports/{iata_faa}` para obtener datos reales del backend. Esa consulta incrementa el ranking de popularidad en Redis con `ZINCRBY` y mantiene la clave `airport_popularity` con expiracion de 24 horas.
